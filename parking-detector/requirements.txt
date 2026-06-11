@@ -1,3 +1,0 @@
-# Core detection dependencies (required)
-opencv-python
-numpy

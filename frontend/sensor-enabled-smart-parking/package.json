@@ -13,6 +13,7 @@
     "axios": "^1.7.0",
     "chart.js": "^4.4.0",
     "firebase": "^11.0.0",
+    "qrcode": "^1.5.4",
     "react": "^19.2.6",
     "react-chartjs-2": "^5.2.0",
     "react-dom": "^19.2.6",

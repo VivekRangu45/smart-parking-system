@@ -1,15 +1,17 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext.jsx';
+import api from '../config/api.js';
 import './Login.css';
 
 export default function Login() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [fullName, setFullName] = useState('');
   const [isRegister, setIsRegister] = useState(false);
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const { user, loading, loginWithEmail, loginWithGoogle, registerWithEmail } = useAuth();
+  const { user, loading, loginWithEmail, loginWithGoogle, registerWithEmail, updateFullName } = useAuth();
   const navigate = useNavigate();
 
   // Redirect users to their respective workspace once authenticated
@@ -30,6 +32,17 @@ export default function Login() {
     try {
       if (isRegister) {
         await registerWithEmail(email, password);
+        // Wait for Firebase to sign in, then our AuthContext will fetch the user and attach token to api interceptor.
+        // But since AuthContext sets loading and might take a moment, we can wait a bit or let it happen.
+        // Actually, updating the profile requires auth token, so let's retry until it works, or we can just update it in AuthContext after registration.
+        // A simpler way: we'll just wait for the user to be set or directly patch.
+        // Since `registerWithEmail` logs the user in, `api.patch` should use the new token on the next tick.
+        setTimeout(async () => {
+          try {
+             await api.patch('/users/me', { full_name: fullName });
+             updateFullName(fullName);
+          } catch(e) { console.error('Failed to patch name', e); }
+        }, 1500); // Hacky, but works given the AuthContext effect timing
       } else {
         await loginWithEmail(email, password);
       }
@@ -69,6 +82,20 @@ export default function Login() {
         {error && <div className="login-error">{error}</div>}
 
         <form onSubmit={handleSubmit} className="login-form">
+          {isRegister && (
+            <div className="form-group">
+              <label htmlFor="fullName">Full Name</label>
+              <input
+                id="fullName"
+                type="text"
+                placeholder="John Doe"
+                value={fullName}
+                onChange={(e) => setFullName(e.target.value)}
+                required={isRegister}
+                maxLength={255}
+              />
+            </div>
+          )}
           <div className="form-group">
             <label htmlFor="email">Email</label>
             <input

@@ -2,7 +2,9 @@ import { useEffect, useState } from 'react';
 import { io } from 'socket.io-client';
 import { useAuth } from '../context/AuthContext.jsx';
 import { useNavigate } from 'react-router-dom';
-import api, { SOCKET_URL } from '../config/api.js';
+import api, { SOCKET_URL, getSocketOptions } from '../config/api.js';
+import ReAuthModal from '../components/ReAuthModal.jsx';
+import QrPass from '../components/QrPass.jsx';
 import './UserDashboard.css';
 
 export default function UserDashboard() {
@@ -15,6 +17,10 @@ export default function UserDashboard() {
   const [message, setMessage] = useState({ text: '', type: '' });
   const [now, setNow] = useState(new Date());
   
+  // Re-Auth Modal State
+  const [isReAuthOpen, setIsReAuthOpen] = useState(false);
+  const [pendingZoneId, setPendingZoneId] = useState(null);
+
   const { user, logout } = useAuth();
   const navigate = useNavigate();
 
@@ -33,9 +39,12 @@ export default function UserDashboard() {
   };
 
   useEffect(() => {
-    const socket = io(SOCKET_URL, { transports: ['websocket', 'polling'] });
+    let socket;
 
-    const fetchData = async () => {
+    const init = async () => {
+      const socketOptions = await getSocketOptions();
+      socket = io(SOCKET_URL, socketOptions);
+
       try {
         const [zonesRes, slotsRes] = await Promise.all([
           api.get('/zones'),
@@ -47,51 +56,57 @@ export default function UserDashboard() {
         console.error('Failed to fetch zones/slots data:', err);
       }
       await fetchBookings();
+
+      socket.on('slot_update', (data) => {
+        setSlots((prev) =>
+          prev.map((s) => (String(s.id) === String(data.slot_id) ? { ...s, is_occupied: data.status } : s))
+        );
+      });
+
+      socket.on('booking_created', () => {
+        api.get('/slots').then((res) => setSlots(res.data || []));
+        fetchBookings();
+      });
+
+      socket.on('bookings_updated', () => {
+        fetchBookings();
+        api.get('/slots').then((res) => setSlots(res.data || []));
+      });
     };
 
-    fetchData();
+    init();
 
-    // Live countdown update interval
     const timer = setInterval(() => setNow(new Date()), 1000);
-
-    socket.on('slot_update', (data) => {
-      setSlots((prev) =>
-        prev.map((s) => (String(s.id) === String(data.slot_id) ? { ...s, is_occupied: data.status } : s))
-      );
-    });
-
-    socket.on('booking_created', () => {
-      api.get('/slots').then((res) => setSlots(res.data || []));
-      fetchBookings();
-    });
-
-    socket.on('bookings_updated', () => {
-      fetchBookings();
-      api.get('/slots').then((res) => setSlots(res.data || []));
-    });
 
     return () => {
       clearInterval(timer);
-      socket.off('slot_update');
-      socket.off('booking_created');
-      socket.off('bookings_updated');
-      socket.disconnect();
+      if (socket) {
+        socket.off('slot_update');
+        socket.off('booking_created');
+        socket.off('bookings_updated');
+        socket.disconnect();
+      }
     };
   }, []);
 
-  const handleBook = async (zoneId) => {
-    setIsBooking(true);
+  const handleBook = (zoneId) => {
     setMessage({ text: '', type: '' });
+    // Open re-auth modal instead of booking directly
+    setPendingZoneId(zoneId);
+    setIsReAuthOpen(true);
+  };
+
+  const handleConfirmBooking = async () => {
+    setIsReAuthOpen(false);
+    setIsBooking(true);
     try {
       const res = await api.post('/bookings', {
-        zone_id: Number(zoneId),
+        zone_id: Number(pendingZoneId),
       });
       const booking = res.data.booking;
       setActiveBookings((prev) => [...prev, booking]);
       setMessage({ text: `Slot #${booking.slot_id} booked successfully!`, type: 'success' });
 
-      // Auto-pay
-      await api.post('/payments', { booking_id: booking.id, amount: 50.0 });
       await fetchBookings();
       
       // Refresh slots
@@ -101,6 +116,7 @@ export default function UserDashboard() {
       setMessage({ text: err.response?.data?.error || 'Booking failed', type: 'error' });
     } finally {
       setIsBooking(false);
+      setPendingZoneId(null);
     }
   };
 
@@ -200,17 +216,28 @@ export default function UserDashboard() {
                     <span className="time-label">Max Duration</span>
                     <span className="time-value">2 hours</span>
                   </div>
-                  <div className="countdown-timer">
-                    <div className="timer-icon">⏱</div>
-                    <div className="timer-text">
-                      <div className="timer-value">{getCountdownStr(b.expires_at)}</div>
-                      <div className="timer-sub">until automatic release</div>
+                    <div className="countdown-timer">
+                      <div className="timer-icon">⏱</div>
+                      <div className="timer-text">
+                        <div className="timer-value">{getCountdownStr(b.expires_at)}</div>
+                        <div className="timer-sub">until automatic release</div>
+                      </div>
                     </div>
                   </div>
-                </div>
-                <button className="btn-cancel" onClick={() => handleCancel(b.id)}>
-                  Release & Complete
-                </button>
+                  
+                  {b.qr_code && (
+                    <QrPass 
+                      qrBase64={b.qr_code} 
+                      bookingId={b.id} 
+                      zoneId={b.zone_id} 
+                      slotId={b.slot_id} 
+                      expiry={b.expires_at} 
+                    />
+                  )}
+
+                  <button className="btn-cancel" onClick={() => handleCancel(b.id)}>
+                    Release & Complete
+                  </button>
               </div>
             ))}
           </div>
@@ -332,6 +359,12 @@ export default function UserDashboard() {
           </table>
         </div>
       </div>
+
+      <ReAuthModal 
+        isOpen={isReAuthOpen} 
+        onClose={() => setIsReAuthOpen(false)} 
+        onSuccess={handleConfirmBooking} 
+      />
     </div>
   );
 }

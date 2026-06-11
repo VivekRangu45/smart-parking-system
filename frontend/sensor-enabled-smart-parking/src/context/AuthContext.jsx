@@ -7,6 +7,8 @@ import {
   createUserWithEmailAndPassword,
   signOut,
   onAuthStateChanged,
+  reauthenticateWithCredential,
+  EmailAuthProvider,
 } from '../config/firebase.js';
 import api from '../config/api.js';
 
@@ -26,6 +28,7 @@ export function AuthProvider({ children }) {
             uid: currentUser.uid,
             email: currentUser.email,
             role: res.data.role,
+            full_name: res.data.full_name || null,
           });
         } catch (err) {
           console.error('Failed to load user profile from backend:', err);
@@ -33,6 +36,7 @@ export function AuthProvider({ children }) {
             uid: currentUser.uid,
             email: currentUser.email,
             role: 'user',
+            full_name: null,
           });
         }
       } else {
@@ -48,7 +52,37 @@ export function AuthProvider({ children }) {
   const registerWithEmail = (email, password) => createUserWithEmailAndPassword(auth, email, password);
   const logout = () => signOut(auth);
 
-  const value = { user, loading, loginWithGoogle, loginWithEmail, registerWithEmail, logout };
+  /**
+   * Re-authenticate current user with their password (Firebase Option B).
+   * Called before sensitive actions like booking creation.
+   * @param {string} password - The user's current password
+   */
+  const reauthenticate = async (password) => {
+    const currentUser = auth.currentUser;
+    if (!currentUser || !currentUser.email) {
+      throw new Error('No authenticated user found.');
+    }
+    const credential = EmailAuthProvider.credential(currentUser.email, password);
+    await reauthenticateWithCredential(currentUser, credential);
+  };
+
+  /**
+   * Update user's full_name in state after profile update
+   */
+  const updateFullName = (full_name) => {
+    setUser((prev) => (prev ? { ...prev, full_name } : prev));
+  };
+
+  const value = {
+    user,
+    loading,
+    loginWithGoogle,
+    loginWithEmail,
+    registerWithEmail,
+    logout,
+    reauthenticate,
+    updateFullName,
+  };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

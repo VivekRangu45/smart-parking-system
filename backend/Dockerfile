@@ -1,23 +1,37 @@
-# ── Stage 1: Build ──
-FROM node:20-alpine AS builder
+# Build from project root: docker build -f backend/Dockerfile .
+FROM node:20-slim
+
+RUN apt-get update && apt-get install -y \
+    python3 \
+    python3-pip \
+    libgl1 \
+    libglib2.0-0 \
+    && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /app
-COPY package*.json ./
+
+COPY backend/package*.json ./
 RUN npm ci --only=production
 
-# ── Stage 2: Runtime ──
-FROM node:20-alpine
-WORKDIR /app
+COPY backend/detection/requirements.txt ./detection/
+RUN pip3 install --break-system-packages --no-cache-dir -r detection/requirements.txt
 
-# Create non-root user
-RUN addgroup -S appgroup && adduser -S appuser -G appgroup
+COPY backend/src ./src
+COPY backend/detection ./detection
+COPY backend/scripts ./scripts
+COPY db/migrations ./db/migrations
+COPY backend/package.json ./
 
-COPY --from=builder /app/node_modules ./node_modules
-COPY src ./src
-COPY package.json ./
+RUN mkdir -p /data && \
+    addgroup --system appgroup && \
+    adduser --system appuser --ingroup appgroup && \
+    chown -R appuser:appgroup /app /data
 
-# Do NOT copy .env or firebase-service-account.json into image;
-# they should be mounted or passed via env vars at runtime.
+ENV SQLITE_PATH=/data/smart_parking.sqlite
+ENV PYTHON_PATH=python3
+ENV NODE_ENV=production
 
 EXPOSE 5000
 USER appuser
-CMD ["node", "src/app.js"]
+
+CMD ["sh", "-c", "node scripts/migrate.js && node src/app.js"]

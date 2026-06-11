@@ -1,0 +1,5 @@
+const PRICE_PER_HOUR = Number(process.env.PRICE_PER_HOUR) || 50;
+const BOOKING_HOURS = Number(process.env.BOOKING_HOURS) || 2;
+const BOOKING_AMOUNT = PRICE_PER_HOUR * BOOKING_HOURS;
+
+module.exports = { PRICE_PER_HOUR, BOOKING_HOURS, BOOKING_AMOUNT };

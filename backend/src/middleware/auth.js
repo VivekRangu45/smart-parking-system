@@ -8,11 +8,8 @@ if (!admin.apps.length) {
   const serviceAccountPath = path.resolve(__dirname, '../../firebase-service-account.json');
   if (fs.existsSync(serviceAccountPath)) {
     const serviceAccount = require(serviceAccountPath);
-    admin.initializeApp({
-      credential: admin.credential.cert(serviceAccount),
-    });
+    admin.initializeApp({ credential: admin.credential.cert(serviceAccount) });
   } else {
-    // Fallback: use env vars (useful in production / Docker)
     admin.initializeApp({
       credential: admin.credential.cert({
         projectId: process.env.FIREBASE_PROJECT_ID,
@@ -25,7 +22,7 @@ if (!admin.apps.length) {
 
 /**
  * Middleware: verifies Firebase ID token from Authorization header.
- * Attaches decoded user info to req.user.
+ * Attaches decoded user info to req.user (id, uid, email, role, full_name).
  */
 const authenticate = async (req, res, next) => {
   const authHeader = req.headers.authorization;
@@ -35,7 +32,8 @@ const authenticate = async (req, res, next) => {
 
   const idToken = authHeader.split(' ')[1];
   let firebaseUser = null;
-  
+
+  // Support test tokens when E2E_TEST=true
   if (process.env.E2E_TEST === 'true' && idToken.startsWith('test_token')) {
     if (idToken === 'test_token_admin') {
       firebaseUser = { uid: 'test_uid_admin', email: 'admin_test@example.com' };
@@ -49,10 +47,7 @@ const authenticate = async (req, res, next) => {
   } else {
     try {
       const decoded = await admin.auth().verifyIdToken(idToken);
-      firebaseUser = {
-        uid: decoded.uid,
-        email: decoded.email || '',
-      };
+      firebaseUser = { uid: decoded.uid, email: decoded.email || '' };
     } catch (err) {
       console.error('Auth verification failed:', err.message);
       return res.status(401).json({ error: 'Invalid or expired token' });
@@ -61,9 +56,14 @@ const authenticate = async (req, res, next) => {
 
   try {
     // Find or create user in database
-    let dbUserResult = await pool.query("SELECT * FROM users WHERE firebase_uid = ?", [firebaseUser.uid]);
+    let dbUserResult = await pool.query(
+      'SELECT * FROM users WHERE firebase_uid = ?',
+      [firebaseUser.uid]
+    );
     let dbUser;
+
     if (dbUserResult.rows.length === 0) {
+      // New user: create with role='user'
       dbUserResult = await pool.query(
         "INSERT INTO users (firebase_uid, email, role) VALUES (?, ?, 'user') RETURNING *",
         [firebaseUser.uid, firebaseUser.email]
@@ -71,7 +71,10 @@ const authenticate = async (req, res, next) => {
       if (dbUserResult.rows.length > 0) {
         dbUser = dbUserResult.rows[0];
       } else {
-        const fallbackRes = await pool.query("SELECT * FROM users WHERE firebase_uid = ?", [firebaseUser.uid]);
+        const fallbackRes = await pool.query(
+          'SELECT * FROM users WHERE firebase_uid = ?',
+          [firebaseUser.uid]
+        );
         dbUser = fallbackRes.rows[0];
       }
     } else {
@@ -83,11 +86,12 @@ const authenticate = async (req, res, next) => {
       uid: dbUser.firebase_uid,
       email: dbUser.email,
       role: dbUser.role,
+      full_name: dbUser.full_name || null,
     };
     next();
   } catch (dbErr) {
-    console.error("Database user sync failed:", dbErr.message);
-    return res.status(500).json({ error: "Authentication database sync failed" });
+    console.error('Database user sync failed:', dbErr.message);
+    return res.status(500).json({ error: 'Authentication database sync failed' });
   }
 };
 

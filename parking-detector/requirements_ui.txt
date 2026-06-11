@@ -1,2 +1,0 @@
-# UI-only dependency (only needed if running ui/app.py)
-flask

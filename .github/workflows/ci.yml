@@ -9,23 +9,10 @@ on:
 jobs:
   test-backend:
     runs-on: ubuntu-latest
-    services:
-      postgres:
-        image: postgres:16-alpine
-        env:
-          POSTGRES_DB: smart_parking
-          POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: testpassword
-        ports: ["5432:5432"]
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
     env:
-      DATABASE_URL: postgres://postgres:testpassword@localhost:5432/smart_parking
-      JWT_SECRET: test-secret
+      SQLITE_PATH: ./backend/smart_parking.sqlite
       NODE_ENV: test
+      E2E_TEST: "true"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -37,7 +24,8 @@ jobs:
         working-directory: ./backend
         run: npm ci
       - name: Run migrations
-        run: node scripts/migrate.js
+        working-directory: ./backend
+        run: npm run migrate
       - name: Run backend tests
         working-directory: ./backend
         run: npm test
@@ -68,9 +56,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Build backend image
-        run: docker build -t smart-parking-backend ./backend
-      - name: Build detection image
-        run: docker build -t smart-parking-detection ./object-detection
+        run: docker build -f backend/Dockerfile -t smart-parking-backend .
       - name: Build frontend image
         run: docker build -t smart-parking-frontend ./frontend/sensor-enabled-smart-parking
 
@@ -99,5 +85,5 @@ jobs:
           HEROKU_API_KEY: ${{ secrets.HEROKU_API_KEY }}
         run: |
           heroku container:login
-          heroku container:push web -a ${{ secrets.HEROKU_APP_NAME }} --context-path ./backend
+          heroku container:push web -a ${{ secrets.HEROKU_APP_NAME }} --context-path .
           heroku container:release web -a ${{ secrets.HEROKU_APP_NAME }}

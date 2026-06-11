@@ -1,34 +1,33 @@
-const request = require("supertest");
-const app = require("../src/app");
-const pool = require("../src/config/db");
+process.env.E2E_TEST = 'true';
+process.env.NODE_ENV = 'test';
 
-describe("Booking API", () => {
+const request = require('supertest');
+const app = require('../src/app');
+const pool = require('../src/config/db');
+
+describe('Booking API', () => {
   beforeAll(async () => {
-    // Ensure a test user exists
     await pool.query(`
-      INSERT INTO users (id, firebase_uid, email) 
-      VALUES (1, 'testuid', 'test@test.com') 
-      ON CONFLICT (id) DO NOTHING
+      INSERT OR IGNORE INTO users (id, firebase_uid, email, role)
+      VALUES (1, 'test_uid_user', 'user_test@example.com', 'user')
     `);
   });
 
   afterAll(async () => {
-    // Optionally clean up or just close the pool to let tests exit
     await pool.end();
   });
 
-  it("should create a booking", async () => {
+  it('should create a booking', async () => {
     const res = await request(app)
-      .post("/api/bookings")
-      .send({ user_id: 1, zone_id: 1, slot_id: 1 });
-      
-    // It might be 201 or 400 if already booked (since it's a real DB)
-    // For a robust test, if it's 400 because "already booked", that means the endpoint works.
-    if (res.statusCode === 400) {
+      .post('/api/bookings')
+      .set('Authorization', 'Bearer test_token_user')
+      .send({ zone_id: 1 });
+
+    if (res.statusCode === 400 || res.statusCode === 409) {
       expect(res.body.error).toBeDefined();
     } else {
       expect(res.statusCode).toBe(201);
-      expect(res.body.booking).toHaveProperty("id");
+      expect(res.body.booking).toHaveProperty('id');
     }
   });
 });

@@ -15,7 +15,7 @@ import {
 } from 'chart.js';
 import { useAuth } from '../context/AuthContext.jsx';
 import { useNavigate } from 'react-router-dom';
-import api, { SOCKET_URL } from '../config/api.js';
+import api, { SOCKET_URL, getSocketOptions } from '../config/api.js';
 import './AdminDashboard.css';
 
 ChartJS.register(
@@ -37,62 +37,118 @@ export default function AdminDashboard() {
   const [revenue, setRevenue] = useState(0);
   const [dailyBookings, setDailyBookings] = useState([]);
   const [usersList, setUsersList] = useState([]);
+  const [stats, setStats] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('active-bookings');
-  const [actionMessage, setActionMessage] = useState('');
+  const [detectionStatus, setDetectionStatus] = useState(null);
+  const [detectionHistory, setDetectionHistory] = useState([]);
+  const [isDetecting, setIsDetecting] = useState(false);
   
   const { user, logout } = useAuth();
   const navigate = useNavigate();
 
+  const fetchDetectionData = async () => {
+    try {
+      const [statusRes, historyRes] = await Promise.all([
+        api.get('/detection/status'),
+        api.get('/detection/history'),
+      ]);
+      setDetectionStatus(statusRes.data || null);
+      setDetectionHistory(historyRes.data || []);
+    } catch (err) {
+      console.error('Failed to fetch detection data:', err);
+    }
+  };
+
   const fetchAdminData = async () => {
     try {
-      const [bookingsRes, slotsRes, occupancyRes, revenueRes, dailyRes, usersRes] = await Promise.all([
+      const [bookingsRes, slotsRes, occupancyRes, statsRes, dailyRes, usersRes] = await Promise.all([
         api.get('/bookings/all'),
         api.get('/slots'),
         api.get('/analytics/occupancy'),
-        api.get('/analytics/revenue'),
+        api.get('/analytics/stats'),
         api.get('/analytics/daily-bookings'),
         api.get('/users'),
       ]);
       setBookings(bookingsRes.data || []);
       setSlots(slotsRes.data || []);
       setOccupancy(occupancyRes.data || []);
-      setRevenue(revenueRes.data?.total_revenue || 0);
+      setStats(statsRes.data || null);
       setDailyBookings(dailyRes.data || []);
       setUsersList(usersRes.data || []);
+      await fetchDetectionData();
     } catch (err) {
       console.error('Failed to fetch admin data:', err);
     }
   };
 
   useEffect(() => {
-    const socket = io(SOCKET_URL, { transports: ['websocket', 'polling'] });
+    let socket;
 
     const init = async () => {
+      const socketOptions = await getSocketOptions();
+      socket = io(SOCKET_URL, socketOptions);
+
+      socket.on('booking_created', () => fetchAdminData());
+      socket.on('slot_update', () => fetchAdminData());
+      socket.on('bookings_updated', () => fetchAdminData());
+      socket.on('detection_updated', () => fetchDetectionData());
+
       await fetchAdminData();
       setIsLoading(false);
     };
+
     init();
 
-    socket.on('booking_created', () => {
-      fetchAdminData();
-    });
-    
-    socket.on('slot_update', () => {
-      fetchAdminData();
-    });
-
-    socket.on('bookings_updated', () => {
-      fetchAdminData();
-    });
-
     return () => {
-      socket.off('booking_created');
-      socket.off('slot_update');
-      socket.off('bookings_updated');
-      socket.disconnect();
+      if (socket) {
+        socket.off('booking_created');
+        socket.off('slot_update');
+        socket.off('bookings_updated');
+        socket.off('detection_updated');
+        socket.disconnect();
+      }
     };
   }, []);
+
+  const handleApplyDetection = async () => {
+    setActionMessage('');
+    setIsDetecting(true);
+    try {
+      const res = await api.post('/detection/apply');
+      setActionMessage(`Detection applied — ${res.data.slots_updated} slots updated.`);
+      await fetchDetectionData();
+      await fetchAdminData();
+    } catch (err) {
+      setActionMessage(err.response?.data?.error || 'Failed to apply detection.');
+    } finally {
+      setIsDetecting(false);
+    }
+  };
+
+  const handleUploadDetection = async (event) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    setActionMessage('');
+    setIsDetecting(true);
+    try {
+      const formData = new FormData();
+      formData.append('image', file);
+      const res = await api.post('/detection', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+      setActionMessage(
+        `Detection complete — ${res.data.occupied_count} occupied, ${res.data.available_count} available.`
+      );
+      await fetchDetectionData();
+      await fetchAdminData();
+    } catch (err) {
+      setActionMessage(err.response?.data?.error || 'Detection upload failed.');
+    } finally {
+      setIsDetecting(false);
+      event.target.value = '';
+    }
+  };
 
   const handleForceRelease = async (slotId) => {
     setActionMessage('');
@@ -123,12 +179,14 @@ export default function AdminDashboard() {
     navigate('/login');
   };
 
-  // Dynamic statistics calculations
-  const totalSlots = slots.length;
-  const occupiedSlots = slots.filter((s) => s.is_occupied).length;
-  const availableSlots = totalSlots - occupiedSlots;
-  const occupancyPercentage = totalSlots > 0 ? ((occupiedSlots / totalSlots) * 100).toFixed(1) : '0';
-  const activeBookingsCount = bookings.filter((b) => b.status === 'active').length;
+  // Dynamic statistics calculations from backend
+  const totalSlots = stats?.total_slots || 0;
+  const occupiedSlots = stats?.occupied_slots || 0;
+  const availableSlots = stats?.available_slots || 0;
+  const occupancyPercentage = stats?.occupancy_percentage || '0.0';
+  const activeBookingsCount = stats?.active_bookings || 0;
+  const lifetimeRevenue = stats?.lifetime_revenue || 0;
+  const todayRevenue = stats?.today_revenue || 0;
 
   // Chart configuration: Zone Occupancy
   const occupancyChartData = {
@@ -249,9 +307,9 @@ export default function AdminDashboard() {
       {/* Stats Cards */}
       <div className="admin-stats-grid">
         <div className="admin-stat-card">
-          <span className="card-lbl">Total Revenue</span>
-          <span className="card-val text-primary">₹{Number(revenue).toLocaleString()}</span>
-          <span className="card-trend">All-time payments</span>
+          <span className="card-lbl">Lifetime Revenue</span>
+          <span className="card-val text-primary">₹{Number(lifetimeRevenue).toLocaleString()}</span>
+          <span className="card-trend">Today: ₹{Number(todayRevenue).toLocaleString()}</span>
         </div>
         <div className="admin-stat-card">
           <span className="card-lbl">Active Bookings</span>
@@ -354,6 +412,12 @@ export default function AdminDashboard() {
             Slots Management
           </button>
           <button 
+            className={`tab-btn ${activeTab === 'detection-management' ? 'active' : ''}`}
+            onClick={() => setActiveTab('detection-management')}
+          >
+            Detection Management
+          </button>
+          <button 
             className={`tab-btn ${activeTab === 'users-management' ? 'active' : ''}`}
             onClick={() => setActiveTab('users-management')}
           >
@@ -383,7 +447,10 @@ export default function AdminDashboard() {
                     .map((b) => (
                       <tr key={b.id}>
                         <td>#{b.id}</td>
-                        <td>{b.user_email || `User ID: ${b.user_id}`}</td>
+                        <td>
+                          <div>{b.user_name || '—'}</div>
+                          <div style={{ fontSize: '11px', color: '#64748b' }}>{b.user_email || `ID: ${b.user_id}`}</div>
+                        </td>
                         <td>Zone {getZoneLetter(b.zone_id)}</td>
                         <td>Slot #{b.slot_id}</td>
                         <td>{new Date(b.start_time).toLocaleTimeString()}</td>
@@ -431,7 +498,10 @@ export default function AdminDashboard() {
                   {bookings.slice(0, 20).map((b) => (
                     <tr key={b.id}>
                       <td>#{b.id}</td>
-                      <td>{b.user_email || `User ID: ${b.user_id}`}</td>
+                      <td>
+                        <div>{b.user_name || '—'}</div>
+                        <div style={{ fontSize: '11px', color: '#64748b' }}>{b.user_email || `ID: ${b.user_id}`}</div>
+                      </td>
                       <td>Zone {getZoneLetter(b.zone_id)}</td>
                       <td>Slot #{b.slot_id}</td>
                       <td><span className={`status-badge ${b.status}`}>{b.status}</span></td>
@@ -492,6 +562,114 @@ export default function AdminDashboard() {
             </div>
           )}
 
+          {/* Tab: Detection Management */}
+          {activeTab === 'detection-management' && (
+            <div className="animate-fade-in">
+              <div className="admin-stats-grid" style={{ marginBottom: '1.5rem' }}>
+                <div className="admin-stat-card">
+                  <span className="card-lbl">Last Detection Run</span>
+                  <span className="card-val text-indigo">
+                    {detectionStatus?.timestamp
+                      ? new Date(detectionStatus.timestamp).toLocaleString()
+                      : '—'}
+                  </span>
+                </div>
+                <div className="admin-stat-card">
+                  <span className="card-lbl">Occupied Slots</span>
+                  <span className="card-val text-danger">{detectionStatus?.occupied_count ?? 0}</span>
+                </div>
+                <div className="admin-stat-card">
+                  <span className="card-lbl">Available Slots</span>
+                  <span className="card-val text-success">{detectionStatus?.available_count ?? 0}</span>
+                </div>
+                <div className="admin-stat-card">
+                  <span className="card-lbl">Total Tracked</span>
+                  <span className="card-val">{detectionStatus?.total_slots ?? 0}</span>
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', gap: '12px', marginBottom: '1.5rem', flexWrap: 'wrap' }}>
+                <button
+                  className="btn-action-release"
+                  onClick={handleApplyDetection}
+                  disabled={isDetecting}
+                >
+                  {isDetecting ? 'Processing…' : 'Apply Latest Detection JSON'}
+                </button>
+                <label className="btn-action-cancel" style={{ cursor: 'pointer', display: 'inline-block' }}>
+                  {isDetecting ? 'Uploading…' : 'Upload Image & Detect'}
+                  <input
+                    type="file"
+                    accept="image/*"
+                    onChange={handleUploadDetection}
+                    disabled={isDetecting}
+                    style={{ display: 'none' }}
+                  />
+                </label>
+              </div>
+
+              <h4 style={{ marginBottom: '0.75rem' }}>Detected Slot States</h4>
+              <div className="table-responsive-wrapper">
+                <table className="admin-table">
+                  <thead>
+                    <tr>
+                      <th>Slot</th>
+                      <th>Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(detectionStatus?.slots || []).map((slot) => (
+                      <tr key={slot.slot_id}>
+                        <td>{String(slot.slot_id).toUpperCase()}</td>
+                        <td>
+                          <span className={`status-badge ${slot.status ? 'occupied' : 'free'}`}>
+                            {slot.status ? 'Occupied' : 'Available'}
+                          </span>
+                        </td>
+                      </tr>
+                    ))}
+                    {(detectionStatus?.slots || []).length === 0 && (
+                      <tr>
+                        <td colSpan="2" className="no-records">No detection data yet. Upload an image or place frames in backend/detection/images.</td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+
+              <h4 style={{ margin: '1.5rem 0 0.75rem' }}>Recent Detection Runs</h4>
+              <div className="table-responsive-wrapper">
+                <table className="admin-table">
+                  <thead>
+                    <tr>
+                      <th>Run ID</th>
+                      <th>Timestamp</th>
+                      <th>Source</th>
+                      <th>Occupied</th>
+                      <th>Available</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {detectionHistory.map((run) => (
+                      <tr key={run.id}>
+                        <td>#{run.id}</td>
+                        <td>{run.timestamp ? new Date(run.timestamp).toLocaleString() : '—'}</td>
+                        <td>{run.source || '—'}</td>
+                        <td className="text-danger">{run.occupied_count}</td>
+                        <td className="text-success">{run.available_count}</td>
+                      </tr>
+                    ))}
+                    {detectionHistory.length === 0 && (
+                      <tr>
+                        <td colSpan="5" className="no-records">No detection history recorded.</td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
           {/* Tab 4: Users List */}
           {activeTab === 'users-management' && (
             <div className="table-responsive-wrapper animate-fade-in">
@@ -510,7 +688,10 @@ export default function AdminDashboard() {
                     <tr key={u.id}>
                       <td>#{u.id}</td>
                       <td><code>{u.firebase_uid}</code></td>
-                      <td>{u.email}</td>
+                      <td>
+                        <div>{u.full_name || '—'}</div>
+                        <div style={{ fontSize: '11px', color: '#64748b' }}>{u.email}</div>
+                      </td>
                       <td>
                         <span className={`role-badge ${u.role}`}>
                           {u.role}
