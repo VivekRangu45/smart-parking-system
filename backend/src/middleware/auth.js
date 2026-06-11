@@ -6,6 +6,8 @@ const pool = require('../config/db');
 // Initialize Firebase Admin SDK once
 if (!admin.apps.length) {
   const serviceAccountPath = path.resolve(__dirname, '../../firebase-service-account.json');
+  console.log("Service Account Path:", serviceAccountPath);
+  console.log("File Exists:", fs.existsSync(serviceAccountPath));
   if (fs.existsSync(serviceAccountPath)) {
     const serviceAccount = require(serviceAccountPath);
     admin.initializeApp({ credential: admin.credential.cert(serviceAccount) });

@@ -31,6 +31,7 @@ ChartJS.register(
 );
 
 export default function AdminDashboard() {
+  const [actionMessage, setActionMessage] = useState('');
   const [bookings, setBookings] = useState([]);
   const [slots, setSlots] = useState([]);
   const [occupancy, setOccupancy] = useState([]);
