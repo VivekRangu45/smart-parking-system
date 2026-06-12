@@ -1,0 +1,85 @@
+.qr-pass-container {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(99, 102, 241, 0.3);
+  border-radius: 16px;
+  padding: 20px;
+  max-width: 280px;
+  margin: 16px auto;
+  text-align: center;
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.2);
+}
+
+.qr-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+}
+
+.qr-header h4 {
+  margin: 0;
+  font-size: 14px;
+  color: #e2e8f0;
+}
+
+.qr-badge {
+  background: rgba(99, 102, 241, 0.2);
+  color: #818cf8;
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.qr-image-wrapper {
+  background: #fff;
+  padding: 12px;
+  border-radius: 12px;
+  display: inline-block;
+  margin-bottom: 16px;
+}
+
+.qr-image {
+  width: 150px;
+  height: 150px;
+  display: block;
+}
+
+.qr-details {
+  display: flex;
+  justify-content: space-around;
+  margin-bottom: 16px;
+  background: rgba(15, 23, 42, 0.4);
+  padding: 10px;
+  border-radius: 8px;
+}
+
+.qr-detail-item {
+  display: flex;
+  flex-direction: column;
+}
+
+.qr-detail-item span {
+  font-size: 11px;
+  color: #94a3b8;
+  margin-bottom: 4px;
+}
+
+.qr-detail-item strong {
+  font-size: 16px;
+  color: #fff;
+}
+
+.qr-footer p {
+  margin: 0;
+  font-size: 12px;
+  color: #cbd5e1;
+}
+
+.qr-hint {
+  font-size: 10px !important;
+  color: #64748b !important;
+  margin-top: 6px !important;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
