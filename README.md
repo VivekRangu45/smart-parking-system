@@ -701,7 +701,7 @@ This project provided practical experience with:
 
 ---
 
-# 💼 Interview Perspective
+
 
 This project demonstrates an end-to-end full-stack workflow:
 
@@ -757,7 +757,7 @@ into a single application.
 
 ---
 
-# 👨‍💻 Author
+# 👨‍💻 About me
 
 **Vivek Rangu**
 
